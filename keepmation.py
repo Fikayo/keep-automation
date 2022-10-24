@@ -1,12 +1,12 @@
 from typing import List
 import gkeepapi
-import keyring
 import json
 import yaml
 import csv
 import pytz
 import sys
 
+from keeper import Keeper, log
 from arghelper import parse_args
 from dateutil import parser
 from os import path
@@ -15,76 +15,10 @@ from datetime import datetime
 utc=pytz.UTC
 
 LAST_RUN = datetime.now()
-TIME_ZERO = utc.localize(parser.parse("2022-10-22"))
+TIME_ZERO = datetime.strptime("2022-10-22", "%Y-%m-%d")
 KEEP_NOTES_STATE = path.join(path.dirname(__file__), './keep_state.json')
 CONFIG = path.join(path.dirname(__file__), './config.yml')
 
-def log(str):
-    print(str)
-
-class Keeper(object):
-    def __init__(self):
-        self._keep = gkeepapi.Keep()
-        self._token = None
-        self._state = None
-
-    @property
-    def keep(self) -> gkeepapi.Keep:
-        return self._keep
-
-    def login(self, email, password):
-        if not self.restore_session(email): 
-            log("creating new keep session")        
-            self._keep.login(email, password, self._state)
-            token = self._keep.getMasterToken()
-            keyring.set_password('google-keep-token', email, token)
-
-    def restore_session(self, email):
-        token = keyring.get_password('google-keep-token', email)
-        if token is None:
-            return False
-
-        log("restoring keep session")
-        try:
-            self._keep.resume(email, token, self._state)
-            return True
-        except Exception as e:
-            log(f"failed to restore session: {e}")
-            return False
-
-    def load_state(self):
-        if not path.exists(KEEP_NOTES_STATE):
-            return
-
-        with open(KEEP_NOTES_STATE, 'r') as fh:
-            self._state = json.load(fh)
-        self._keep.restore(self._state)
-
-    def store_state(self):
-        self._state = self._keep.dump()
-        with open(KEEP_NOTES_STATE, 'w') as fh:
-            json.dump(self._state, fh)
-
-    def filter(self, func: callable) -> List[gkeepapi._node.TopLevelNode]:
-        notes = []
-        for n in self._keep.find(func=func):
-            notes.append(n)
-        return notes
-
-    def find_note(self, id) -> gkeepapi._node.TopLevelNode:
-        return self._keep.get(id)
-
-
-def filterNote(note: gkeepapi._node.TopLevelNode):
-    _1hour = 60 * 60
-
-    # example created time "2022-10-02T10:19:50.742000Z"
-    created = note.timestamps.created
-    elapsed = (created - LAST_RUN).total_seconds()
-    if TIME_ZERO < created or note.archived or elapsed > _1hour:
-        return False
-        
-    return True
 
 
 def fetch_vars() -> dict():
@@ -108,7 +42,7 @@ def fetch_config() -> dict():
     return conf
 
 
-def store_config(conf) -> None:
+def save_config(conf) -> None:
     with open(CONFIG, 'w') as file:
         yaml.safe_dump(conf, file)
 
@@ -122,17 +56,29 @@ def dump_notes(vars: dict(), notes: List[gkeepapi._node.TopLevelNode], timestamp
 
     # Write to json
     jsonpath = vars['keep_notes_json']
+    dump_json(jsonpath, notesJson)
     if timestamp:
-        jsonpath = path.join(path.dirname(jsonpath), f"{path.basename(jsonpath)}-{datetime.now()}.json")
-
-    with open(jsonpath, 'w') as file:
-        json.dump(notesJson, file)
+        name, ext = path.splitext(path.basename(jsonpath))
+        jsonpath = path.join(path.dirname(jsonpath), f"{name}-{datetime.now()}.{ext}")
+        dump_json(jsonpath, notesJson)
 
     # Write to csv
     csvpath = vars['keep_notes_csv']
+    dump_csv(csvpath, notes)
     if timestamp:
-        csvpath = path.join(path.dirname(csvpath), f"{path.basename(csvpath)}-{datetime.now()}.csv")
+        name, ext = path.splitext(path.basename(csvpath))
+        csvpath = path.join(path.dirname(csvpath), f"{name}-{datetime.now()}.{ext}")
+        dump_csv(csvpath, notes)
+    
+    print(f"Keep Notes stored in:\n{jsonpath}\n{csvpath}")
+    return jsonpath, csvpath
 
+
+def dump_json(jsonpath, notesJson):
+    with open(jsonpath, 'w') as file:
+        json.dump(notesJson, file)
+
+def dump_csv(csvpath, notes):
     with open(csvpath, 'w',  newline='') as file:
         # See https://realpython.com/python-csv/#writing-csv-files-with-csv for details
         csv_writer = csv.writer(file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
@@ -144,9 +90,18 @@ def dump_notes(vars: dict(), notes: List[gkeepapi._node.TopLevelNode], timestamp
             for l in n.labels.all():
                 labels.append(l.name)
             csv_writer.writerow([n.id, n.title, ", ".join(labels), repr(n.text)])
-    
-    print(f"Keep Notes stored in:\n{jsonpath}\n{csvpath}")
-    return jsonpath, csvpath
+
+
+def filterNote(note: gkeepapi._node.TopLevelNode):
+    _1hour = 60 * 60
+
+    # example created time "2022-10-02T10:19:50.742000Z"
+    created = note.timestamps.created
+    elapsed = (created - LAST_RUN).total_seconds()
+    if TIME_ZERO > created or note.archived or elapsed > _1hour:
+        return False
+        
+    return True
 
 
 def main(args):
@@ -182,7 +137,7 @@ def main(args):
 
     log("Keepmation completed - caching keep state")
     k.store_state()
-    store_config(conf)
+    save_config(conf)
 
 
 if __name__ == "__main__":
