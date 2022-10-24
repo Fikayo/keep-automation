@@ -1,4 +1,3 @@
-from tkinter import LAST
 from typing import List
 import gkeepapi
 import keyring
@@ -6,8 +5,9 @@ import json
 import yaml
 import csv
 import pytz
-import sys, getopt
+import sys
 
+from arghelper import parse_args
 from dateutil import parser
 from os import path
 from datetime import datetime
@@ -45,8 +45,12 @@ class Keeper(object):
             return False
 
         log("restoring keep session")
-        self._keep.resume(email, token, self._state)
-        return True
+        try:
+            self._keep.resume(email, token, self._state)
+            return True
+        except Exception as e:
+            log(f"failed to restore session: {e}")
+            return False
 
     def load_state(self):
         if not path.exists(KEEP_NOTES_STATE):
@@ -75,10 +79,8 @@ def filterNote(note: gkeepapi._node.TopLevelNode):
     _1hour = 60 * 60
 
     # example created time "2022-10-02T10:19:50.742000Z"
-    created = parser.parse(note.timestamps.created)
+    created = note.timestamps.created
     elapsed = (created - LAST_RUN).total_seconds()
-    print(elapsed)
-
     if TIME_ZERO < created or note.archived or elapsed > _1hour:
         return False
         
@@ -94,6 +96,7 @@ def fetch_vars() -> dict():
         vars = yaml.safe_load(file)
     return vars
 
+
 def fetch_config() -> dict():
     conf = dict() 
     if path.exists(CONFIG):
@@ -104,11 +107,13 @@ def fetch_config() -> dict():
         return dict()
     return conf
 
+
 def store_config(conf) -> None:
     with open(CONFIG, 'w') as file:
         yaml.safe_dump(conf, file)
 
-def dump_notes(vars: dict(), notes: List[gkeepapi._node.TopLevelNode]) -> None:
+
+def dump_notes(vars: dict(), notes: List[gkeepapi._node.TopLevelNode], timestamp=False) -> None:
     notesJson = list()
     for n in notes:
         obj = n.save()
@@ -116,25 +121,35 @@ def dump_notes(vars: dict(), notes: List[gkeepapi._node.TopLevelNode]) -> None:
         notesJson.append(obj)
 
     # Write to json
-    with open(vars['keep_notes_json'], 'w') as file:
+    jsonpath = vars['keep_notes_json']
+    if timestamp:
+        jsonpath = path.join(path.dirname(jsonpath), f"{path.basename(jsonpath)}-{datetime.now()}.json")
+
+    with open(jsonpath, 'w') as file:
         json.dump(notesJson, file)
 
     # Write to csv
-    with open(vars['keep_notes_csv'], 'w',  newline='') as file:
+    csvpath = vars['keep_notes_csv']
+    if timestamp:
+        csvpath = path.join(path.dirname(csvpath), f"{path.basename(csvpath)}-{datetime.now()}.csv")
+
+    with open(csvpath, 'w',  newline='') as file:
         # See https://realpython.com/python-csv/#writing-csv-files-with-csv for details
         csv_writer = csv.writer(file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-        csv_writer.writerow(["id", "title", "created", "labels", "text"])
+        csv_writer.writerow(["id", "title", "labels", "text"])
         
         for n in notes:
             labels = list()
             l: gkeepapi._node.Label
             for l in n.labels.all():
                 labels.append(l.name)
-            csv_writer.writerow([n.id, n.title, n.timestamps.created, ", ".join(labels), repr(n.text)])
+            csv_writer.writerow([n.id, n.title, ", ".join(labels), repr(n.text)])
     
-    print(f"Keep Notes stored in {vars['keep_notes_csv']}")
+    print(f"Keep Notes stored in:\n{jsonpath}\n{csvpath}")
+    return jsonpath, csvpath
 
-def main(specific_note_id=None):
+
+def main(args):
     global LAST_RUN
     conf = fetch_config()
 
@@ -153,41 +168,24 @@ def main(specific_note_id=None):
     log("Keepmation login succesful")
 
     # Filter notes for notion.
-    if specific_note_id == None:
+    if not args.get("note_id"):
         notes = k.filter(filterNote)
-        dump_notes(vars, notes)
+        dump_notes(vars, notes, args.get("preserve_history"))
     else:
-        note = k.find_note(specific_note_id)
-        dump_notes(vars, [note])
+        note = k.find_note(args.get("note_id"))
+        dump_notes(vars, [note], args.get("preserve_history"))
 
         # Reset and sync note
-        note.text = ''
-        k.keep.sync()
+        if args.get("reset_note"):
+            note.text = ''
+            k.keep.sync()
 
     log("Keepmation completed - caching keep state")
     k.store_state()
     store_config(conf)
 
 
-
-
-def print_help():
-    print('keepmation.py -n <note_id>')
-
 if __name__ == "__main__":
-    try:
-        opts, args = getopt.getopt(sys.argv[1:],"hn:",["note_id="])
-    except getopt.GetoptError:
-        print_help()
-        sys.exit(2)
-
-    note_id = None
-    for opt, arg in opts:
-        if opt == '-h':
-            print_help()
-            sys.exit()
-        elif opt in ("-n", "--node_id"):
-            note_id = arg
-
-    main(note_id)
+    args = parse_args(sys.argv[1:])
+    main(args)
 

@@ -2,3 +2,5 @@ vars.yml
 keep_state.json
 keep_notes_*
 config.yml
+
+__pycache__/
