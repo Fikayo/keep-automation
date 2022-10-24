@@ -1,23 +1,13 @@
+import json
+from datetime import datetime
+from os import path
 from typing import List
+
 import gkeepapi
 import keyring
-import json
-import yaml
-import csv
-import pytz
-import sys
 
-from arghelper import parse_args
-from dateutil import parser
-from os import path
-from datetime import datetime
 
-utc=pytz.UTC
-
-LAST_RUN = datetime.now()
-TIME_ZERO = parser.parse("2022-10-22")
 KEEP_NOTES_STATE = path.join(path.dirname(__file__), './keep_state.json')
-CONFIG = path.join(path.dirname(__file__), './config.yml')
 
 
 def log(str):
