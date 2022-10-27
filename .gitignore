@@ -4,3 +4,6 @@ keep_notes_*
 config.yml
 
 __pycache__/
+
+*.bin
+*auth.yml

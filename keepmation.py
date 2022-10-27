@@ -9,16 +9,21 @@ from keeper import Keeper, log
 from arghelper import parse_args
 from os import path
 from datetime import datetime
+from globals import AUTH_PATH, CONFIG_PATH, SECRET_PATH, VARS_PATH
+from authmaker import decrypt
 
 
 LAST_RUN = datetime.now()
 TIME_ZERO = datetime.strptime("2022-10-22", "%Y-%m-%d")
-CONFIG = path.join(path.dirname(__file__), './config.yml')
 
+
+def fetch_cipher_key(path):
+    with open(path, "rb") as file:
+        return file.read()
 
 
 def fetch_vars() -> dict():
-    vars_path = path.join(path.dirname(__file__), './vars.yml')
+    vars_path = VARS_PATH
     if not path.exists(vars_path):
         raise Exception(f"Cannot find vars file {vars_path}")
 
@@ -26,11 +31,20 @@ def fetch_vars() -> dict():
         vars = yaml.safe_load(file)
     return vars
 
+def fetch_auth() -> dict():
+    auth_path = AUTH_PATH
+    if not path.exists(auth_path):
+        raise Exception(f"Cannot find auth file {auth_path}; run `python3 authmaker` to generate auth files")
+
+    with open(auth_path, 'r') as file:
+        vars = yaml.safe_load(file)
+    return vars
+
 
 def fetch_config() -> dict():
     conf = dict() 
-    if path.exists(CONFIG):
-        with open(CONFIG, 'r') as file:
+    if path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, 'r') as file:
             conf = yaml.safe_load(file)
 
     if conf is None:
@@ -39,7 +53,7 @@ def fetch_config() -> dict():
 
 
 def save_config(conf) -> None:
-    with open(CONFIG, 'w') as file:
+    with open(CONFIG_PATH, 'w') as file:
         yaml.safe_dump(conf, file)
 
 
@@ -109,9 +123,10 @@ def main(args):
         LAST_RUN = conf["last_run"]
     conf["last_run"] = LAST_RUN
 
-    vars = fetch_vars()
-    email = vars["email"]
-    password = vars["password"]
+    auth = fetch_auth()
+    ci_key = fetch_cipher_key(SECRET_PATH)
+    email = decrypt(ci_key, auth["email"])
+    password = decrypt(ci_key, auth["password"])
 
     k = Keeper()
     k.login(email, password)
@@ -119,6 +134,7 @@ def main(args):
     log("Keepmation login succesful")
 
     # Filter notes for notion.
+    vars = fetch_vars()
     if not args.get("note_id"):
         notes = k.filter(filterNote)
         dump_notes(vars, notes, args.get("preserve_history"))

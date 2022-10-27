@@ -1,7 +1,3 @@
-# GOOGLE credentials - keep safe
-email: email
-password: password
-
 # Absolute paths to where to store keep notes for notion later
 keep_notes_json: path/to/keep_notes_json.json
 keep_notes_csv:  path/to/keep_notes_csv.csv
