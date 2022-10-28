@@ -1,6 +1,7 @@
 from typing import List
 import gkeepapi
 import json
+import keyring
 import yaml
 import csv
 import sys
@@ -10,16 +11,16 @@ from arghelper import parse_args
 from os import path
 from datetime import datetime
 from globals import AUTH_PATH, CONFIG_PATH, SECRET_PATH, VARS_PATH
-from authmaker import decrypt
+from authmaker import AUTH_SERVICE
 
 
 LAST_RUN = datetime.now()
 TIME_ZERO = datetime.strptime("2022-10-22", "%Y-%m-%d")
 
 
-def fetch_cipher_key(path):
-    with open(path, "rb") as file:
-        return file.read()
+# def fetch_cipher_key(path):
+#     with open(path, "rb") as file:
+#         return file.read()
 
 
 def fetch_vars() -> dict():
@@ -30,6 +31,7 @@ def fetch_vars() -> dict():
     with open(vars_path, 'r') as file:
         vars = yaml.safe_load(file)
     return vars
+
 
 def fetch_auth() -> dict():
     auth_path = AUTH_PATH
@@ -124,9 +126,8 @@ def main(args):
     conf["last_run"] = LAST_RUN
 
     auth = fetch_auth()
-    ci_key = fetch_cipher_key(SECRET_PATH)
-    email = decrypt(ci_key, auth["email"])
-    password = decrypt(ci_key, auth["password"])
+    email = auth["email"]
+    password = keyring.get_password(AUTH_SERVICE, email)
 
     k = Keeper()
     k.login(email, password)
