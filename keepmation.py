@@ -10,17 +10,12 @@ from keeper import Keeper, log
 from arghelper import parse_args
 from os import path
 from datetime import datetime
-from globals import AUTH_PATH, CONFIG_PATH, SECRET_PATH, VARS_PATH
+from globals import AUTH_PATH, CONFIG_PATH, VARS_PATH
 from authmaker import AUTH_SERVICE
 
 
 LAST_RUN = datetime.now()
 TIME_ZERO = datetime.strptime("2022-10-22", "%Y-%m-%d")
-
-
-# def fetch_cipher_key(path):
-#     with open(path, "rb") as file:
-#         return file.read()
 
 
 def fetch_vars() -> dict():
@@ -125,11 +120,16 @@ def main(args):
         LAST_RUN = conf["last_run"]
     conf["last_run"] = LAST_RUN
 
+    
+    use_keyring = not args.get("no_key")
     auth = fetch_auth()
     email = auth["email"]
-    password = keyring.get_password(AUTH_SERVICE, email)
-
-    k = Keeper()
+    password = None
+    if use_keyring:
+        password = keyring.get_password(AUTH_SERVICE, email)
+    
+    # If no password, user will be asked during login by keeper.
+    k = Keeper(use_keyring=use_keyring)
     k.login(email, password)
     k.load_state()
     log("Keepmation login succesful")
